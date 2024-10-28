@@ -81,13 +81,17 @@ class VideoTextTranslator:
         # Fallback to default
         return None
 
-    def create_text_image(self, text: str, original_region: np.ndarray, width: int, height: int) -> np.ndarray:
+    def create_text_image(
+        self, text: str, original_region: np.ndarray, width: int, height: int
+    ) -> np.ndarray:
         try:
             output = np.zeros((height, width, 3), dtype=np.uint8)
             x_offset = 0
             total_char_width = 0
 
-            style_tensor = self.region_to_tensor(original_region)  # Shape: (1, 64, 64, 1)
+            style_tensor = self.region_to_tensor(
+                original_region
+            )  # Shape: (1, 64, 64, 1)
             style_rgb = np.repeat(style_tensor, 3, axis=-1)  # Convert grayscale to RGB
 
             # First pass: calculate total width of all characters
@@ -103,26 +107,38 @@ class VideoTextTranslator:
 
             for char in text:
                 char_tensor = self.char_to_tensor(char)
-                fannet_output = self.fannet.predict({'input_1': style_tensor, 'input_2': char_tensor})[0]
+                fannet_output = self.fannet.predict(
+                    {"input_1": style_tensor, "input_2": char_tensor}
+                )[0]
                 fannet_output = np.expand_dims(fannet_output, axis=0)
-                colornet_output = self.colornet.predict({'input_1': style_rgb, 'input_2': fannet_output})[0]
+                colornet_output = self.colornet.predict(
+                    {"input_1": style_rgb, "input_2": fannet_output}
+                )[0]
 
                 char_height, char_width = colornet_output.shape[:2]
                 new_width = int(char_width * scale)
                 new_height = int(char_height * scale)
 
                 if new_width <= 0 or new_height <= 0:
-                    self.logger.warning(f"Invalid character size after scaling: {new_width}x{new_height}")
+                    self.logger.warning(
+                        f"Invalid character size after scaling: {new_width}x{new_height}"
+                    )
                     continue
 
-                char_image = cv2.resize(colornet_output, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+                char_image = cv2.resize(
+                    colornet_output,
+                    (new_width, new_height),
+                    interpolation=cv2.INTER_LINEAR,
+                )
 
                 y_offset = (height - new_height) // 2
                 if x_offset + new_width > width:
                     self.logger.warning("Text exceeds image width. Truncating.")
                     break
 
-                output[y_offset:y_offset + new_height, x_offset:x_offset + new_width] = char_image
+                output[
+                    y_offset : y_offset + new_height, x_offset : x_offset + new_width
+                ] = char_image
                 x_offset += new_width
 
             return output
@@ -133,7 +149,7 @@ class VideoTextTranslator:
             return original_region
 
     def char_to_tensor(self, char: str) -> np.ndarray:
-    # Keep the original alphabet for FANNET compatibility
+        # Keep the original alphabet for FANNET compatibility
         fannet_alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         # Extended alphabet for character recognition
         extended_alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ^"
@@ -147,9 +163,13 @@ class VideoTextTranslator:
             # For characters in extended alphabet but not in FANNET alphabet,
             # use a default representation (e.g., last letter 'Z')
             onehot[-1] = 1.0
-            self.logger.info(f"Character '{char}' mapped to default FANNET representation.")
+            self.logger.info(
+                f"Character '{char}' mapped to default FANNET representation."
+            )
         else:
-            self.logger.warning(f"Character '{char}' not found in extended alphabet. Using default.")
+            self.logger.warning(
+                f"Character '{char}' not found in extended alphabet. Using default."
+            )
             onehot[-1] = 1.0  # Use 'Z' as default
 
         return np.array(onehot).reshape(1, 26, 1)  # Shape: (1, 26, 1)
@@ -160,47 +180,47 @@ class VideoTextTranslator:
         return np.expand_dims(resized, axis=(0, -1)) / 255.0  # Shape: (None, 64, 64, 1)
 
     def detect_text_batch(self, batch: FrameBatch) -> List[List[dict]]:
-       all_results = []
-       try:
-           self.logger.info(f"Processing batch of {len(batch.frames)} frames")
-           for frame_idx, frame in enumerate(batch.frames):
-               self.logger.info(f"Processing frame {frame_idx}")
-               frame_results = self.detect_text_easyocr_from_frame(frame)
-               all_results.append(frame_results)
-               self.logger.debug(f"Frame {frame_idx}: detected {len(frame_results) if frame_results else 0} text regions")
+        all_results = []
+        try:
+            self.logger.info(f"Processing batch of {len(batch.frames)} frames")
+            for frame_idx, frame in enumerate(batch.frames):
+                self.logger.info(f"Processing frame {frame_idx}")
+                frame_results = self.detect_text_easyocr_from_frame(frame)
+                all_results.append(frame_results)
+                self.logger.debug(
+                    f"Frame {frame_idx}: detected {len(frame_results) if frame_results else 0} text regions"
+                )
 
-       except Exception as e:
-           self.logger.error(f"Error in batch text detection: {str(e)}")
-           self.logger.exception("Exception details:")
-           all_results = [[] for _ in range(len(batch.frames))]
+        except Exception as e:
+            self.logger.error(f"Error in batch text detection: {str(e)}")
+            self.logger.exception("Exception details:")
+            all_results = [[] for _ in range(len(batch.frames))]
 
-       return all_results
+        return all_results
 
     def detect_text_easyocr_from_frame(self, frame):
-       try:
-           results = self.reader.readtext(frame)
-           
-           if not results:
-               self.logger.info("No text detected in frame")
-               return []
+        try:
+            results = self.reader.readtext(frame)
 
-           self.logger.info(f"Detected {len(results)} text elements.")
+            if not results:
+                self.logger.info("No text detected in frame")
+                return []
 
-           text_info = []
-           for i, (bbox, text, conf) in enumerate(results, 1):
-               text_info.append({
-                   "description": text,
-                   "bounding_box": bbox,
-                   "confidence": conf
-               })
+            self.logger.info(f"Detected {len(results)} text elements.")
 
-               self.logger.debug(f"Text {i}: '{text}' (Confidence: {conf:.2f})")
+            text_info = []
+            for i, (bbox, text, conf) in enumerate(results, 1):
+                text_info.append(
+                    {"description": text, "bounding_box": bbox, "confidence": conf}
+                )
 
-           return text_info
+                self.logger.debug(f"Text {i}: '{text}' (Confidence: {conf:.2f})")
 
-       except Exception as e:
-           self.logger.error(f"Error in EasyOCR text detection: {str(e)}")
-           return []
+            return text_info
+
+        except Exception as e:
+            self.logger.error(f"Error in EasyOCR text detection: {str(e)}")
+            return []
 
     def preprocess_frame(self, frame):
         if frame.ndim == 2:  # Grayscale
@@ -211,7 +231,9 @@ class VideoTextTranslator:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         return frame
 
-    def translate_batch(self, texts_batch: List[List[Tuple[str, List[Tuple[float, float]]]]]) -> List[List[str]]:
+    def translate_batch(
+        self, texts_batch: List[List[Tuple[str, List[Tuple[float, float]]]]]
+    ) -> List[List[str]]:
         """Translate multiple texts in batch."""
         try:
             flat_texts = [
@@ -269,28 +291,43 @@ class VideoTextTranslator:
                     frame_translations = translated_texts[frame_idx]
                     frame_regions = text_regions[frame_idx]
 
-                    self.logger.debug(f"Processing frame {frame_idx} with {len(frame_regions)} regions")
+                    self.logger.debug(
+                        f"Processing frame {frame_idx} with {len(frame_regions)} regions"
+                    )
 
-                    for region_info, translated_text in zip(frame_regions, frame_translations):
+                    for region_info, translated_text in zip(
+                        frame_regions, frame_translations
+                    ):
                         try:
                             bounding_box = region_info["bounding_box"]
-                            x_min, y_min = map(int, min(bounding_box, key=lambda p: p[0] + p[1]))
-                            x_max, y_max = map(int, max(bounding_box, key=lambda p: p[0] + p[1]))
+                            x_min, y_min = map(
+                                int, min(bounding_box, key=lambda p: p[0] + p[1])
+                            )
+                            x_max, y_max = map(
+                                int, max(bounding_box, key=lambda p: p[0] + p[1])
+                            )
 
                             region_width = x_max - x_min
                             region_height = y_max - y_min
 
                             if region_width <= 0 or region_height <= 0:
-                                self.logger.warning(f"Invalid region dimensions in frame {frame_idx}: {bounding_box}")
+                                self.logger.warning(
+                                    f"Invalid region dimensions in frame {frame_idx}: {bounding_box}"
+                                )
                                 continue
 
                             original_region = processed_frame[y_min:y_max, x_min:x_max]
                             text_image = self.create_text_image(
-                                translated_text, original_region, region_width, region_height
+                                translated_text,
+                                original_region,
+                                region_width,
+                                region_height,
                             )
                             processed_frame[y_min:y_max, x_min:x_max] = text_image
                         except Exception as e:
-                            self.logger.error(f"Error processing region in frame {frame_idx}: {str(e)}")
+                            self.logger.error(
+                                f"Error processing region in frame {frame_idx}: {str(e)}"
+                            )
 
                     processed_frames.append(processed_frame)
                 except Exception as e:
@@ -437,7 +474,7 @@ class VideoTextTranslator:
         except Exception as e:
             self.logger.error(f"Error processing frame: {str(e)}")
             return frame
-        
+
     def process_single_frame(self, frame_path: str) -> np.ndarray:
         """Process a single frame."""
         try:
@@ -445,11 +482,11 @@ class VideoTextTranslator:
             frame = cv2.imread(frame_path)
             if frame is None:
                 raise ValueError(f"Could not read image from {frame_path}")
-    
+
             # Process the frame using existing methods
             processed_frame = self.process_frame(frame)
             return processed_frame
-    
+
         except Exception as e:
             self.logger.error(f"Error processing single frame: {str(e)}")
             self.logger.exception("Exception details:")
@@ -481,7 +518,3 @@ def main():
         import sys
 
         sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
